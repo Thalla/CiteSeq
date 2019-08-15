@@ -624,3 +624,14 @@ adt <- divideByHist(adt, "CD3", "TCell")
 adt <- divideByHist(adt, "CD19", "BCell")
 ```
 
+```{r additional R stuff}
+# analyse data frame
+str(df)
+
+# absolute numbers
+table(df$column)
+
+# proportions
+prop.table(table(train$Survived))
+
+```
