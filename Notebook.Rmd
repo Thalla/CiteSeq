@@ -1,41 +1,47 @@
 ---
 title: "CiteSeqData"
-output: html_notebook
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
 ---
 
-###Definitions
-ADT: antibody-derived tags, which query the cell-surface proteins
-Barcode: random DNA oligomer that is the id of a single cell
-T-cell: co-receptor CD3
-        Either helper cell (CD4) or cytotoxic (CD8)
-B-cell: co-receptor CD19
+Version 2:  
+- init  
+- adt analysis less redundant  
+- mouse human difference  
 
+### Definitions
+ADT: antibody-derived tags, which query the cell-surface proteins  
+Barcode: random DNA oligomer that is the id of a single cell  
+T-cell: co-receptor CD3  
+        Either helper cell (CD4) or cytotoxic (CD8)  
+B-cell: co-receptor CD19  
+        Additional markers: CD34, CD10  
+ 
 
 *Related paper:* Stoeckius et al., 
-"Simultaneous epitope and transcriptome measurement in single cells" 
-Nature Methods, 14:865 (2017). doi:10.1038/nmeth.4380
-The paper is about the authors "CiteSeq" method of simultaneously assaying transcriptiome and cell surface markers ("epitome" in their parlance) for a few thousand single cells from umbilical cord blood.
-
-Raw data:
-Gene Expression Omnibus (GEO) data archive, accession number GSE100866: 
-https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE100866
-Files 
-- GSE100866_CBMC_8K_13AB_10X-ADT_umi.csv.gz  ADT
-- GSE100866_CBMC_8K_13AB_10X-RNA_umi.csv.gz  matrices with the UMI (i.e., read) counts for the mRNA
-The columns are the barcodes of the cells. Both files contain the same cells. 
-
-
-Helpful (?):
-https://bioconductor.org/packages/release/workflows/vignettes/simpleSingleCell/inst/doc/reads.html
-
-
-```{r libraries}
+"Simultaneous epitope and transcriptome measurement in single cells"   
+Nature Methods, 14:865 (2017). doi:10.1038/nmeth.4380  
+The paper is about the authors "CiteSeq" method of simultaneously assaying transcriptiome and cell surface markers ("epitome" in their parlance) for a few thousand single cells from umbilical cord blood.  
+  
+Raw data:   
+Gene Expression Omnibus (GEO) data archive, accession number GSE100866:   
+https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE100866  
+Files   
+-  GSE100866_CBMC_8K_13AB_10X-ADT_umi.csv.gz  ADT   
+-  GSE100866_CBMC_8K_13AB_10X-RNA_umi.csv.gz  matrices with the UMI (i.e., read) counts for the mRNA  
+The columns are the barcodes of the cells. Both files contain the same cells.   
+ 
+*Libraries*
+```{r libraries, message=FALSE, warning=FALSE}
 library(data.table) # for reading in csv files
 library(autothresholdr) # for otsu method
+library(ggplot2) # for qplot
 ```
 
 
-
+*Read and save RNA data*
 ```{r read and save rna data, eval=FALSE, include=TRUE}
 rna <- data.table::fread("GSE100866_CBMC_8K_13AB_10X-RNA_umi.csv")
 rna <- data.frame(rna)
@@ -45,65 +51,9 @@ rna <- rna[,-1]
 
 save(rna, file = "rna.RData")
 ```
-
-```{r init}
+*init*
+```{r init, echo=TRUE}
 load("rna.RData")
-
-humanGeneNumb <- length(grep("HUMAN*", rownames(rna), value = TRUE))
-humanGenes <- grep("HUMAN*", rownames(rna), value = TRUE)
-hGeneData <- rna[which(rownames(rna) %in% humanGenes),]
-hGeneData <- rbind(hGeneData, "sum" = colSums(hGeneData))
-rm(humanGenes)
-
-mouseGeneNumb <- length(grep("MOUSE*", rownames(rna), value = TRUE))
-mouseGenes <- grep("MOUSE*", rownames(rna), value = TRUE)
-mGeneData <- rna[which(rownames(rna) %in% mouseGenes),]
-mGeneData <- rbind(mGeneData, "sum" = colSums(mGeneData))
-rm(mouseGenes)
-
-rm(rna)
-
-
-m <- data.frame(t(mGeneData["15880",]))
-ggplot(data=m, aes(m$X15880)) + 
-+     geom_histogram(breaks=seq(0, 60000, by = 2500), col=("yellow"))
-
-
-
-
-# histogram treshold
-divideByHist <- function(data, inputRow){
-  tresh <- auto_thresh(t(data[inputRow,]),"otsu")
-  data <- rbind(data, overTresh = as.integer(data[inputRow,]>tresh))
-  data
-}
-inputRow <- "sum"
-mGeneData <- divideByHist(mGeneData, inputRow)
-hGeneData <- divideByHist(hGeneData, inputRow)
-
-getSubset <- function(data, cond){
-  
-}
-
-# Find all T- and B-Cells
-tCellIndices <- which(data1[type1,]==1 & ((data1[type1,]+adt["THelpercell",]+adt["Tcytocell",]) > (adt["Bcell",]+adt["B34cell",]+adt["B10cell",])))
-tcells <- adt[,tCellIndices]
-
-cond3 <- function(type1, type2, type3, type4, type5, type6){
-  which(data1[type1,]==1 & ((data1[type1,]+data[type2,]+data[type3,]) > (data[type4,]+data[type5,]+data[type6,])))
-}
-
-cond1only <- function(type1, type2){
-  which(data1[type1,]==1 & data2[type2,] != 1)
-}
-
-cond1both <- function(type1, type2){
-  which(data1[type,]==1)
-}
-
-indices <- cond1()
-
-
 
 # read and save adt data
 adt <- data.table::fread("GSE100866_CBMC_8K_13AB_10X-ADT_umi.csv")
@@ -115,12 +65,121 @@ adt <- adt[,-1]
 cellNumb <- length(adt)
 ```
 
-The transcriptiome data set inlcudes `r humanGeneNumb` human genes and `r mouseGeneNumb` mouse genes and ERCC_ERCC-00104.
-All in all there are `r cellNumb` cells.
+*Function definitions*
+```{r function definitions, echo=TRUE}
+# For an input row the otsu method is used to divide the data in two sets. 
+divideByHist <- function(data, inputRow, outputRow){
+  tresh <- auto_thresh(t(data[inputRow,]),"otsu")
+  data <- rbind(data, outputRow = as.integer(data[inputRow,]>tresh))
+  rownames(data)[rownames(data) == "outputRow"] <- outputRow
+  data
+}
 
+# conditions
+
+cond1only <- function(type1, type2, op){
+  which(type1 == 1 & type2 != 1)
+}
+
+cond1both <- function(type1, type2){
+  which(type1 == 1 & type2 == 1)
+}
+
+cond1none <- function(type1, type2){
+  which(type1 != 1 & type2 != 1)
+}
+
+
+# normalization of rna data
+norm <- function(rnaData){
+  geneNumb <- nrow(rnaData)-1
+rnaDataNumb <- length(rnaData)
+
+trampoline <- function(f, ...) {
+  function(...) {
+    ret <- f(...)
+    while (inherits(ret, "recursion")) {
+      ret <- eval(as.call(c(f, unclass(ret))))
+    }
+    ret
+  }
+}
+
+recur <- function(...) {
+  structure(list(...), class = "recursion")
+}
+
+logSum = trampoline(function(cell, sum, gene){
+   if(cell == rnaDataNumb){
+      sum
+   }else{
+      if(rnaData[gene,cell] <= 0.0){
+         recur(cell+1, sum, gene)
+      }
+      else{
+         recur(cell+1, sum + log(1+ rnaData[gene,cell]/rnaData["cs",cell] * 1e4), gene)
+      }
+   }
+})
+
+
+   logSum <- sapply(1:geneNumb, FUN = function(gene){
+      # normalize current gene counts
+      logSum(1, 1, gene)-1
+   })
+
+logSum
+}
+```
+
+
+`r nrow(adt)` markers have been used. The overall number of cells is `r cellNumb`.  
+  
 # ADT data: sorting cells
 
-```{r ADT data, sorting cells}
+```{r ADT data, echo=TRUE}
+# @Before: read adt data
+
+# Add rows to the adt table that inform about which markers have counts above the treshold based on their histograms.
+adt <- divideByHist(adt, "CD3", "tCell")
+adt <- divideByHist(adt, "CD4", "tHelperCell")
+adt <- divideByHist(adt, "CD8", "tCytoCell")
+adt <- divideByHist(adt, "CD19", "bCell")
+adt <- divideByHist(adt, "CD34", "bCell34")
+adt <- divideByHist(adt, "CD10", "bCell10")
+
+
+# Find all T- and B-Cells by their markers (doublets are excluded)
+tcells <- adt[,cond1only(adt["tCell",], adt["bCell",])]
+bcells <- adt[,cond1only(adt["bCell",], adt["tCell",])]
+
+# @optional
+# Consider CD4 and CD8 markers to come to a clearer decision
+realTcells <- tcells[, which(tcells["tHelperCell",] == 1 | tcells["tCytoCell",] == 1)]
+realBcells <- bcells[, which(bcells["tHelperCell",] != 1 & bcells["tCytoCell",] != 1)]
+tcells <- realTcells
+bcells <- realBcells
+
+# sort T-cells (strong CD4 and CD8 cells are excluded when CD3 is too weak)
+tcells <- divideByHist(tcells, "CD4", "tHelperNew")
+tcells <- divideByHist(tcells, "CD8", "tCytoNew")
+# get only clear decisions
+tHelper <- tcells[,cond1only(tcells["tHelperNew",], tcells["tCytoNew",])]
+tCyto <- tcells[,cond1only(tcells["tCytoNew",], tcells["tHelperNew",])]
+
+# compare CD3 amount in T-cells with CD19 amount in B-cells
+cd3inT <- sum(tcells["CD3",])/length(tcells)
+cd19inB <- sum(bcells["CD19",])/length(bcells)
+tToB <- cd3inT/cd19inB
+
+# compare CD4 amount in T-helper with CD8 amount in T-Cytotoxic
+cd4inThelper <- sum(tHelper["CD4",])/length(tHelper)
+cd8inTcyto <- sum(tCyto["CD8",])/length(tCyto)
+helperToCyto <- cd4inThelper/cd8inTcyto 
+```
+* Alternative Version*
+```{r ADT data v2, eval=FALSE, include=TRUE}
+# The sorting is more detailed and more redundant. More non single cells are included in the sorting result than above.
 # @Before: read adt data
 
 # otsu tresholds
@@ -138,17 +197,6 @@ adt <- rbind(adt, "Tcytocell" = as.integer(adt["CD8",]>CD8Tresh))
 adt <- rbind(adt, "Bcell" = as.integer(adt["CD19",]>CD19Tresh))
 adt <- rbind(adt, "B34cell" = as.integer(adt["CD34",]>CD34Tresh))
 adt <- rbind(adt, "B10cell" = as.integer(adt["CD10",]>CD10Tresh))
-
-
-# histogram treshold
-divideByHist <- function(data, inputRow, outputRow){
-  tresh <- auto_thresh(t(data[inputRow,]),"otsu")
-  data <- rbind(data, outputRow = as.integer(data[inputRow,]>tresh))
-  rownames(data)[rownames(data) == "outputRow"] <- outputRow
-  data
-}
-adt <- divideByHist(adt, "CD3", "TCell")
-adt <- divideByHist(adt, "CD19", "BCell")
 
 
 # Find all T- and B-Cells
@@ -198,10 +246,21 @@ rm(CD19Tresh)
 rm(CD34Tresh)
 rm(CD10Tresh)
 
+gc()
+
 # Save data
 save(adt, file = "adtWithTreshRows.RData")
 
 ```
+
+CD3 counts in T-cells per cell: `r cd3inT`  
+CD19 counts in B-cells per cell: `r cd19inB`  
+-> T:B = r`tToB`  
+
+CD4 counts in T-helper per cell: `r cd4inThelper`  
+CD8 counts in B-cytotoxic per cell: `r cd8inTcyto`  
+-> helper:cytotoxic = r`helperToCyto`  
+
 
 # Histograms ADT data
 
@@ -243,45 +302,26 @@ qplot(data$CD19, geom="histogram", binwidth = 0.01) + scale_x_continuous(trans="
 ```
 
 # Transcriptiome data
-The genes that are expressed by T-cells & B-cells is analysed. 
-Process
-- Defining subsets
-- Normalization 
+The genes that are expressed by T-cells & B-cells are analysed.  
+Process  
+- Defining subsets 
+- Normalization  
+- Comparison 
 
-No spare matrix is used because the apply function is used and apply transforms a spare matrix back to a normal one. 
+No spare matrix is used because the apply function is used and apply transforms a spare matrix back to a normal one.  
 
-Two-sample Wilcoxon rank sum test is used because of the difference in sample size. 
-Normalization and testing happens together gene by gene. To save time the normalized data isn't saved. 
-
-Time for normalization and wilkox test without if clause (50 genes):
-      User      System verstrichen 
-      57.21        0.75       58.29 
-Time for normalization and wilkox test with if clause (50 genes):
-       User      System verstrichen 
-       7.24        0.27        7.56 
-       
-log(product)
-       User      System verstrichen 
-     132.61        0.00      132.67 
-
-log() + log() + ...
-       User      System verstrichen 
-     132.50        1.96      134.42 
-
-```{r}
+```{r rna analysis, echo=TRUE}
 # @Before: Run chunk "ADT data, sorting cells" 
 
 ### Define subsets ###
-rnaTcells <- rna[,tCellIndices]
-rnaBcells <- rna[,bCellIndices]
-rnaThelper <- rnaTcells[colnames(tHelperCells)]
-rnaTcyto <- rnaTcells[colnames(tCytoCells)]
+rnaTcells <- rna[,colnames(tcells)]
+rnaBcells <- rna[,colnames(bcells)]
+
+rm(rna)
 
 # Get information on which genes are expressed
 isGeneExpressedInTcells <- apply(rnaTcells, 1, function(row) sum(row) > 0.0)
 isGeneExpressedInBcells <- apply(rnaBcells, 1, function(row) sum(row) > 0.0)
-isGeneExpressedInThelper <- apply(rnaThelper, 1, function(row) sum(row) > 0.0)
-isGeneExpressedInTcyto <- apply(rnaTcyto, 1, function(row) sum(row) > 0.0)
 
 # Delete genes that aren't expressed in at least one of the cell types T and B
 isGeneExpressed <- isGeneExpressedInTcells | isGeneExpressedInBcells
@@ -290,16 +330,23 @@ rnaBcells <- rnaBcells[isGeneExpressed,]
 # Update 
 isGeneExpressedInTcells = isGeneExpressedInTcells[isGeneExpressed]
 isGeneExpressedInBcells = isGeneExpressedInBcells[isGeneExpressed]
-# Delete genes that aren't expressed in at least one of the cell types Helper and Cytotoxic
-isGeneExpressed <- isGeneExpressedInThelper | isGeneExpressedInTcyto
-rnaThelper <- rnaThelper[isGeneExpressed,]
-rnaTcyto <- rnaTcyto[isGeneExpressed,]
-#Update
-isGeneExpressedInThelper = isGeneExpressedInThelper[isGeneExpressed]
-isGeneExpressedInTcyto = isGeneExpressedInTcyto[isGeneExpressed]
+
+# define subsets
+rnaThelper <- rnaTcells[colnames(tHelper)]
+rnaTcyto <- rnaTcells[colnames(tCyto)]
+
+
+isGeneExpressedInThelper <- apply(rnaThelper, 1, function(row) sum(row) > 0.0)
+isGeneExpressedInTcyto <- apply(rnaTcyto, 1, function(row) sum(row) > 0.0)
+
+
+###### see @optional_2 ########
+ 
 
 rm(isGeneExpressed)
 
+
+######## @optional ############
 ## Sort genes ##
 # T- and B-cell specific genes
 onlyTcellGenes <- rnaTcells[isGeneExpressedInTcells & !isGeneExpressedInBcells,]
@@ -313,12 +360,6 @@ bCellSub <- rnaBcells[isGeneExpressedInTcells & isGeneExpressedInBcells,]
 tHelperSub <- rnaThelper[isGeneExpressedInThelper & isGeneExpressedInTcyto,]
 tCytoSub <- rnaTcyto[isGeneExpressedInThelper & isGeneExpressedInTcyto,]
 
-## Normalization ##
-# Formula (can reduce heteroskedasticity) :
-# y = log( 1 + k/cs * 1e4)
-# k is gene count
-# cs is sum over all genes for a cell
-
 # cs values for normalization
 csTcellSub <- colSums(tCellSub)
 tCellSub <- rbind(tCellSub, "cs" = csTcellSub)
@@ -331,38 +372,106 @@ tHelperSub <- rbind(tHelperSub, "cs" = csThelperSub)
 
 csTcytoSub <- colSums(tCytoSub)
 tCytoSub <- rbind(tCytoSub, "cs" = csTcytoSub)
+############################################################### @optional end
 
 
+## Normalization ##
+# Formula (can reduce heteroskedasticity) :
+# y = log( 1 + k/cs * 1e4)
+# k is gene count
+# cs is sum over all genes for a cell
+
+# cs values for normalization
+rnaTcyto <- rbind(rnaTcyto, "cs" = colSums(rnaTcyto))
+rnaThelper <- rbind(rnaThelper, "cs" = colSums(rnaThelper))
+rnaBcells <- rbind(rnaBcells, "cs" = colSums(rnaBcells))
 
 
-# ....
-
-
-qplot(logSum, geom="histogram", binwidth = 1) + ylim(0,10)
-
-tCellSub <- cbind(tCellSub, "sum" = c(logSum, sum(logSum)))
-
-bCellSub <- cbind(bCellSub, "sum" = c(logSum, sum(logSum)))
-
-
-
-calculateSum <- function(gene, sum){
-   if(gene == geneNumb){
-      sum 
-   }else{
-      calculateSum(gene+1, c(sum, log(logSum(1, 1, gene)-1)))
-   }
+# calculate normalization
+if(file.exists("tCytoLogSum.RData")){
+  load("tCytoLogSum.RData")
+}else{
+  tCytoLogSum <- norm(rnaTcyto)
+  save(tCytoLogSum, file = "tCytoLogSum.RData")
 }
-sum <- c()
-sumOfCounts <- calculateSum(1, sum)
+
+if(file.exists("bLogSum.RData")){
+  load("bLogSum.RData")
+}else{
+  bLogSum <- norm(rnaBcells)
+  save(bLogSum, file= "bLogSum.RData")
+}
+
+if(file.exists("tHelperLogSum.RData")){
+  load("tHelperLogSum.RData")
+}else{
+  tHelperLogSum <- norm(rnaThelper)
+  save(tHelperLogSum, file= "tHelperLogSum.RData")
+}
 
 
-# Genes coding for the marker proteins (CD3, CD4, CD8)
+# normalize before comparison between each other 
+# -> normalized counts per cell because of difference in sample size
+tCytoLogSum <- (tCytoLogSum*10000)/length(tCytoLogSum)
+bLogSum <- (bLogSum*10000)/length(bLogSum)
+tHelperLogSum <- (tHelperLogSum*10000)/length(tHelperLogSum)
 
-# Is the expression of their mRNA in agreement with the expression of the surface markers according to the ADT data?
+# combine results in new table
+logSumComp <- NULL
+logSumComp <- rbind(logSumComp, tHelperLogSum = tHelperLogSum)
+logSumComp <- rbind(logSumComp, tCytoLogSum = tCytoLogSum)
+logSumComp <- rbind(logSumComp, bLogSum = bLogSum)
+logSumComp <- data.frame(logSumComp)
+colnames(logSumComp) <- rownames(rnaTcyto[1:nrow(rnaTcyto)-1,]) # -1 because of cs row at the end of the table
+logSumComp <- rbind(logSumComp, "cs" = colSums(logSumComp))
+logSumComp <- logSumComp[,which(logSumComp["cs",]!= 0)]
+
+logSumComp <- data.frame(t(logSumComp))
+
+
+plot(logSumComp$tHelperLogSum, col=c("red"), ylim = c(0, 700), main = "Counts helper-cyto-b red-yellow-green", ylab="Counts")
+par(new=T)
+plot(logSumComp$tCytoLogSum, col=c("yellow"), ylim = c(0, 700), main = "", ylab="")
+par(new=T)
+plot(logSumComp$bLogSum, col=c("green"), ylim = c(0, 700), main = "", ylab = "")
+
+
+# compare each t-helper-cell with each cyto*helperToCyto value to find the combination with the lowest difference, 
+# which means that they have the same ratio as CD4 and CD8 cells.
+logSumComp <- cbind(logSumComp, "cyto*helperToCyto" = logSumComp$tCytoLogSum * helperToCyto)
+comp <- data.table(cyto = logSumComp$`cyto*helperToCyto`[which(logSumComp$`cyto*helperToCyto`!= 0)])
+comp <- cbind(comp, helper = logSumComp$tHelperLogSum[which(logSumComp$`cyto*helperToCyto`!= 0)])
+rownames(comp) <- rownames(logSumComp[which(logSumComp$`cyto*helperToCyto`!= 0),])
+diffs <- lapply(comp$cyto, function(x){
+  min(abs(x-comp$helper))
+})
+
+diffs <- unlist(diffs)
+minDiffPos <- which(diffs==min(diffs))
+rownames(comp)[minDiffPos]
+
+
+
+
+
+# compare 
+plot(logSumComp$`cyto*helperToCyto`, logSumComp$tCytoLogSum, ylim = c(0, 900), xlim = c(0,500))
+par(new=T)
+abline(0,1, col= c("yellow"))
+
+# zoom in
+plot(logSumComp$`cyto*helperToCyto`, logSumComp$tCytoLogSum, ylim = c(0, 230), xlim = c(0,200))
+par(new=T)
+abline(0,1, col= c("yellow"))
+
+
+
+logSumComp <- cbind(logSumComp, b= as.integer(logSumComp$bLogSum > (logSumComp$tCytoLogSum + logSumComp$tHelperLogSum)))
+isBGene <- logSumComp[which(logSumComp$b ==1),]
+isBGene$b <- ((isBGene$tHelperLogSum + isBGene$tCytoLogSum)*50)/isBGene$bLogSum
+
 
 ```
-
 ## Genes only in T-cells
 ```{r}
 rownames(onlyTcellGenes)
@@ -371,16 +480,6 @@ rownames(onlyTcellGenes)
 ## Genes only in B-cells
 ```{r}
 rownames(onlyBcellGenes)
-```
-
-## Genes stronger in T-cells than in B-cells
-```{r}
-
-```
-
-## Genes stronger in B-cells than in T-cells
-```{r}
-
 ```
 
 ## Genes only in T-Helper Cells
@@ -394,16 +493,74 @@ rownames(onlyTcyto)
 ```
 
 
-# Cheat Sheet
+The gene in cytotxic t-cells in comparison with t-helper cells which counts are most similar to the ones of CD8 to CD4 is `r rownames(comp)[minDiffPos]`. Because this gene is not the CD8 gene this was not explored further. 
 
-```{r code snippets}
-# comparison T-cell marker vs. B-cell marker (normalization is missing!)
-TvsB <- data.table(t(adt["Tcell",]+adt["THelpercell",]+adt["Tcytocell",]),t((adt["Bcell",]+adt["B34cell",]+adt["B10cell",])))
-
-
+*optional_2*
+```{r optional_2, eval=FALSE, include=TRUE}
+# @optional_2 (see rna analysis chunk)
+# Delete genes that aren't expressed in at least one of the cell types Helper and Cytotoxic
+# This leads to a table with dimensions different from i.e. B-Cells. Direct comparison won't be possible anymore.
+isGeneExpressed <- isGeneExpressedInThelper | isGeneExpressedInTcyto
+rnaThelper <- rnaThelper[isGeneExpressed,]
+ rnaTcyto <- rnaTcyto[isGeneExpressed,]
+#Update
+isGeneExpressedInThelper = isGeneExpressedInThelper[isGeneExpressed]
+isGeneExpressedInTcyto = isGeneExpressedInTcyto[isGeneExpressed]
 ```
 
-```{r data preprocessing}
+
+
+# Mouse cells and Human cells
+```{r human vs. mouse, eval=FALSE, include=TRUE }
+
+# divide data by organism
+humanGeneNumb <- length(grep("HUMAN*", rownames(rna), value = TRUE))
+humanGenes <- grep("HUMAN*", rownames(rna), value = TRUE)
+hGeneData <- rna[which(rownames(rna) %in% humanGenes),]
+hGeneData <- rbind(hGeneData, "sum" = colSums(hGeneData))
+rm(humanGenes)
+
+mouseGeneNumb <- length(grep("MOUSE*", rownames(rna), value = TRUE))
+mouseGenes <- grep("MOUSE*", rownames(rna), value = TRUE)
+mGeneData <- rna[which(rownames(rna) %in% mouseGenes),]
+mGeneData <- rbind(mGeneData, "sum" = colSums(mGeneData))
+rm(mouseGenes)
+
+mGeneData <- divideByHist(mGeneData, "sum", "isMouse")
+hGeneData <- divideByHist(hGeneData, "sum", "isHuman")
+
+mhComparison <- data.frame(t(mGeneData["isMouse",]), t(hGeneData["isHuman",]))
+
+mOnly <- mGeneData[, cond1only(mGeneData["isMouse",], hGeneData["isHuman",])]
+hOnly <- hGeneData[, cond1only(hGeneData["isHuman",], mGeneData["isMouse",])]
+mAndH <- cond1both(mGeneData["isMouse",], hGeneData["isHuman",])
+notMH <- cond1none(mGeneData["isMouse",], hGeneData["isHuman",])
+
+rm(hGeneData)
+rm(mGeneData)
+
+mouse <- length(mOnly)
+human <- length(hOnly)
+mousehuman <- length(mAndH)
+nothing <- length(notMH)
+
+rm(mOnly)
+rm(hOnly)
+rm(mAndH)
+rm(notMH)
+
+```
+  
+Dividing the data by otsu treshold leads to the following result:  
+- # mouse cells: r`mouse`  
+- # human cells: r`human`  
+- # mouse+human cells: r`mousehuman`  
+- # nothing of both: r`nothing`  
+
+
+# Cheat Sheet, Code Snippets,...
+*data preprocessing*
+```{r data preprocessing, eval=FALSE, include=TRUE}
 # Use first row for column names 
 # Given: table with row and column names, t(table), columns have V1,... names and real names are in first row...
 colnames(adt) = as.character(adt[1,])
@@ -414,8 +571,8 @@ adt <- adt[-1,]
 adt <- data.table(adt)  
 
 ```
-
-```{r histograms, histogram treshold}
+*histograms*
+```{r histograms, histogram treshold, eval=FALSE, include=TRUE}
 # histogram trehshold with otsu
 library(autothresholdr)
 auto_thresh(data,"otsu")
@@ -425,7 +582,6 @@ CD3Tresh <- log10(auto_thresh(t(adt["CD3",]),"otsu"))
 CD19Tresh <- log10(auto_thresh(t(adt["CD19",]),"otsu"))
 CD8Tresh <- log10(auto_thresh(t(adt["CD8",]),"otsu"))
 CD4Tresh <- log10(auto_thresh(t(adt["CD4",]),"otsu"))
-
 
 
 # ggplot histogram
@@ -450,10 +606,11 @@ truehist(t(cd3[1, 2:cellNumb]))
 truehist(t(cd3[1, 2:cellNumb]), col = ("yellow"), prob = TRUE) #, ymax = 10000)
 ```
 
-
-```{r two histograms in one (pixel like)}
+*two histograms in one (pixel like)*
+```{r two histograms in one (pixel like), eval=FALSE, include=TRUE}
 # Combine T-cell marker CD3 and B-Cell marker CD19 in one histogram similar to black and white values in a picture
-# CD3 numbers are positive, CD19 negative. This should result in a histogram with three peaks. Low numbers show B cells, high numbers T cells and in the middle are the cells with roughly the same number of t-cell marker as there is b-cell marker. 
+# CD3 numbers are positive, CD19 negative. This should result in a histogram with three peaks. Low numbers show B cells, 
+# high numbers T cells and in the middle are the cells with roughly the same number of t-cell marker as there is b-cell marker. 
 
 adt <-rbind(adt, "TB" = adt["CD3",]-adt["CD19",]+3257)  # +3257 to make all values positive, needed for otsu
 TBTresh <- auto_thresh(t(adt["TB",]),"otsu")
@@ -472,15 +629,15 @@ ggplot(data=data, aes(data$TM)) +
 # normalizing counts in before would be better
 
 ```
-
-```{r summing up marker results/ table rows}
+*summing up marker results/ table rows*
+```{r summing up marker results/ table rows, eval=FALSE, include=TRUE}
 # normalizing in before would be better
 adt <-rbind(adt, "TMarkerSum" = adt["CD3",]+adt["CD4",]+adt["CD8",]+adt["CD45RA",]+adt["CCR7",])
 adt <-rbind(adt, "BMarkerSum" = adt["CD19",]+adt["CD34",]+adt["CD10",])
 adt <-rbind(adt, "TProperty" = adt["TMarkerSum",]-adt["BMarkerSum",])
 ```
-
-```{r Getting same columns in different tables}
+*Getting same columns in different tables*
+```{r Getting same columns in different tables, eval=FALSE, include=TRUE}
 # Given:  - Table1 with all data (adt)
 #         - Table1.1 with subset of Table1 (tHelperCells)
 #         - Table2 with same column names as Table1 (rna data)
@@ -493,8 +650,8 @@ tHelperRna <-rna[,which(colnames(adt) %in% colnames(tHelperCells))]
 # !Caution! The following is wrong: rna[,which(colnames(tHelperCells) %in% colnames(adt))]
 # Because this would return the indices of the tHelperCells table.
 ```
-
-```{r Sparse matrix}
+*Sparse matrix*
+```{r Sparse matrix, eval=FALSE, include=TRUE}
 # with Matrix library
 library(Matrix)
 Matrix(as.matrix(dataFrame), sparse=TRUE)
@@ -508,61 +665,51 @@ library(slam) # to prevent apply converting sparse matrix to matrix
 ...
 
 ```
-
-```{r time check normalization}
-# User      System verstrichen 
-# 899.53        0.47      901.44 
-# for each gene: normalize gene data for both cell types and compare the data with the wilcox test, save p-Values
-rnaData <- tCellSub[,1:1000]
-geneNumb <- nrow(rnaData)-1
-rnaDataNumb <- length(rnaData)
-
-trampoline <- function(f, ...) {
-  function(...) {
-    ret <- f(...)
-    while (inherits(ret, "recursion")) {
-      ret <- eval(as.call(c(f, unclass(ret))))
-    }
-    ret
-  }
-}
-
-recur <- function(...) {
-  structure(list(...), class = "recursion")
-}
-
-logSum = trampoline(function(cell, sum, gene){
-   if(cell == rnaDataNumb){
-      sum
-   }else{
-      if(rnaData[gene,cell] <= 0.0){
-         recur(cell+1, sum, gene)
-      }
-      else{
-         recur(cell+1, sum + log(1+ rnaData[gene,cell]/rnaData["cs",cell] * 1e4), gene)
-      }
-   }
-})
-
-
-system.time({
-   logSum <- sapply(1:geneNumb, FUN = function(gene){
-      # normalize current gene counts
-      logSum(1, 1, gene)-1
-   })
-})
-```
-
-
-```{r install Bioconductor}
+*Getting same columns in different tables*
+```{r install Bioconductor, eval=FALSE, include=TRUE}
 
 if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 BiocManager::install()
 
 ```
+*code snippet*
+```{r code snippets, eval=FALSE, include=TRUE}
+# comparison T-cell marker vs. B-cell marker (normalization is missing!)
+TvsB <- data.table(t(adt["Tcell",]+adt["THelpercell",]+adt["Tcytocell",]),t((adt["Bcell",]+adt["B34cell",]+adt["B10cell",])))
 
-```{r senseless}
+
+```
+*time check normalization*
+```{r time check normalization, eval=FALSE, include=TRUE}
+# User      System verstrichen 
+# 899.53        0.47      901.44 
+# for each gene: normalize gene data for both cell types and compare the data with the wilcox test, save p-Values
+
+# User      System verstrichen 
+# 213.98        0.01      214.11 
+#bLogSum <- logSum
+
+#Two-sample Wilcoxon rank sum test is used because of the difference in sample size. 
+#Normalization and testing happens together gene by gene. To save time the normalized data isn't saved. 
+
+# Time for normalization and wilkox test without if clause (50 genes):
+#       User      System verstrichen 
+#       57.21        0.75       58.29 
+# Time for normalization and wilkox test with if clause (50 genes):
+#        User      System verstrichen 
+#        7.24        0.27        7.56 
+#        
+# log(product)
+#        User      System verstrichen 
+#      132.61        0.00      132.67 
+# 
+# log() + log() + ...
+#        User      System verstrichen 
+#      132.50        1.96      134.42 
+```
+*senseless*
+```{r senseless, eval=FALSE, include=TRUE}
 
 system.time({
 # for each gene: normalize gene data for both cell types and compare the data with the wilcox test, save p-Values
@@ -588,21 +735,54 @@ pValuesGreater <- unlist(pValuesGreater)
 m <- Matrix(as.matrix(bCellSub), sparse=TRUE)
 rnaData <- m
 
+#---------------------------------------------------------------------------------------------------
 
+# @params
+# 1: data
+# 2: shall match 1
+# 3-8: sum of 3-5 is compared with sum of 6-8
+# 9: operator for comparison, i.e. ">"
+cond3only <- function(data, type, type1, type2, type3, type4, type5, type6, op){
+  which(data[type,]==1 & match.fun(FUN = op)((data[type1,]+ data[type2,]+data[type3,]), (data[type4,]+data[type5,]+data[type6,])))
+}
+
+# type1 is 1 and type4 is 1
+cond3both <- function(data, type1, type2, type3, type4, type5, type6, op){
+  which(data[type1,]==1 & data[type4,]==1 & match.fun(FUN = op)((data[type1,]+data[type2,]+data[type3,]), (data[type4,]+data[type5,]+data[type6,])))
+ 
+}
+
+tcells <- adt[,cond3only(adt, "tCell", "bCell", "bCell34", "bCell10", "tCell", "tHelperCell", "tCytoCell", "<")]
+bcells <- adt[,cond3only(adt, "bCell", "bCell", "bCell34", "bCell10", "tCell", "tHelperCell", "tCytoCell", ">")]
+
+
+
+data <- adt
+type1 <- "tCell"
+type2 <-  "tHelperCell"
+type3 <- "tCytoCell"
+type4 <-  "bCell"
+type5 <- "bCell34"
+type6 <- "bCell10"
+op <- "=="
+hm <- adt[,which(data[type1,]==1 & data[type4,]==1 & match.fun(FUN = op)((data[type1,]+data[type2,]+data[type3,]), (data[type4,]+data[type5,]+data[type6,])))]
+hm <- adt[,which(data[type1,]==1 & data[type4,]==1)]
+data <- hm
+hm[,which(match.fun(FUN = op)((data[type1,]+data[type2,]+data[type3,]), (data[type4,]+data[type5,]+data[type6,])))]
 
 ```
-
-```{r regex for col/row names}
+*regex for col/row names*
+```{r regex for col/row names, eval=FALSE, include=TRUE}
 # Get all rownames that match regex
 grep("HUMAN*", rownames(rna), value = TRUE)
 ```
-
-```{r divide table by row names}
+*regex for col/row names*
+```{r divide table by row names, eval=FALSE, include=TRUE}
 # Get position in table where row names change (i.e. from HUMAN_... to MOUSE_...)
 lastHumanGenePos <- which(rownames(rna) == tail(humanGenes, 1))
 ```
-
-```{r redundancy reduction}
+*redundancy reduction*
+```{r redundancy reduction, eval=FALSE, include=TRUE}
 ##### Before #######
 # otsu tresholds
 CD3Tresh <- auto_thresh(t(adt["CD3",]),"otsu")
@@ -622,5 +802,14 @@ divideByHist <- function(data, inputRow, outputRow){
 }
 adt <- divideByHist(adt, "CD3", "TCell")
 adt <- divideByHist(adt, "CD19", "BCell")
+```
+*use operator as function argument*
+```{r use operator as function argument, eval=FALSE, include=TRUE}
+f <- function(a,b,op){
+  match.fun(FUN = op)(a,b)
+}
+
+f(3,3, "==")
+
 ```
 
